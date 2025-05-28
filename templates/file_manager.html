@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Manager</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-bottom: 20px;
+        }
+        .navbar {
+            background-color: #343a40;
+        }
+        .breadcrumb-item a {
+            text-decoration: none;
+        }
+        .table td, .table th {
+            vertical-align: middle;
+        }
+        .action-buttons {
+            white-space: nowrap;
+        }
+        .action-buttons .btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+        }
+        .hover-actions {
+            visibility: hidden;
+        }
+        tr:hover .hover-actions {
+            visibility: visible;
+        }
+        .folder-icon {
+            color: #ffc107;
+        }
+        .file-icon {
+            color: #17a2b8;
+        }
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            background-color: #f8f9fa;
+            margin-bottom: 20px;
+        }
+        .upload-area:hover {
+            border-color: #aaa;
+            background-color: #f1f3f5;
+        }
+        .modal-header {
+            background-color: #343a40;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('file_manager') }}">
+                <i class="fas fa-folder-open me-2"></i>File Manager
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user me-1"></i>{{ username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb" class="mb-4">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('file_manager') }}"><i class="fas fa-home me-1"></i>Home</a></li>
+                {% if current_dir %}
+                    {% set parts = current_dir.split('/') %}
+                    {% set current_path = '' %}
+                    {% for part in parts %}
+                        {% if part %}
+                            {% set current_path = current_path + '/' + part if current_path else part %}
+                            <li class="breadcrumb-item"><a href="{{ url_for('file_manager', dir=current_path) }}">{{ part }}</a></li>
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
+            </ol>
+        </nav>
+
+        <!-- Action Buttons -->
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <button type="button" class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                    <i class="fas fa-upload me-1"></i>Upload File
+                </button>
+                <button type="button" class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#createFolderModal">
+                    <i class="fas fa-folder-plus me-1"></i>Buat Folder
+                </button>
+                {% if 'clipboard' in session and session['clipboard'] %}
+                    <form method="post" action="{{ url_for('paste') }}" class="d-inline">
+                        <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                        <button type="submit" class="btn btn-warning">
+                            <i class="fas fa-paste me-1"></i>Paste {{ session['clipboard']['item_name'] }}
+                        </button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Upload Area (Drag & Drop) -->
+        <div class="upload-area mb-4" id="dropZone">
+            <i class="fas fa-cloud-upload-alt fa-3x mb-3" style="color: #6c757d;"></i>
+            <h5>Drag & Drop Files Here</h5>
+            <p class="text-muted">or use the upload button above</p>
+        </div>
+
+        <!-- File Listing -->
+        <div class="card">
+            <div class="card-header bg-dark text-white">
+                <i class="fas fa-list me-2"></i>File List
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 5%">#</th>
+                                <th style="width: 45%">Nama</th>
+                                <th style="width: 15%">Ukuran</th>
+                                <th style="width: 20%">Modifikasi Terakhir</th>
+                                <th style="width: 15%">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if parent_dir is not none %}
+                            <tr>
+                                <td><i class="fas fa-level-up-alt"></i></td>
+                                <td colspan="3">
+                                    <a href="{{ url_for('file_manager', dir=parent_dir) }}" class="text-decoration-none">
+                                        <i class="fas fa-folder-open folder-icon me-2"></i>..
+                                    </a>
+                                </td>
+                                <td></td>
+                            </tr>
+                            {% endif %}
+                            
+                            {% for folder in folders %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>
+                                    <a href="{{ url_for('file_manager', dir=folder.path) }}" class="text-decoration-none">
+                                        <i class="fas fa-folder folder-icon me-2"></i>{{ folder.name }}
+                                    </a>
+                                </td>
+                                <td>Folder</td>
+                                <td>{{ folder.date_modified }}</td>
+                                <td class="action-buttons">
+                                    <div class="btn-group">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" 
+                                                onclick="setRenameData('{{ folder.name }}', 'folder')" 
+                                                data-bs-toggle="modal" data-bs-target="#renameModal">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <form method="post" action="{{ url_for('copy') }}" class="d-inline">
+                                            <input type="hidden" name="item_name" value="{{ folder.name }}">
+                                            <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{{ url_for('cut') }}" class="d-inline">
+                                            <input type="hidden" name="item_name" value="{{ folder.name }}">
+                                            <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-warning">
+                                                <i class="fas fa-cut"></i>
+                                            </button>
+                                        </form>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" 
+                                                onclick="setDeleteData('{{ folder.name }}', 'folder')"
+                                                data-bs-toggle="modal" data-bs-target="#deleteModal">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            
+                            {% for file in files %}
+                            <tr>
+                                <td>{{ loop.index + folders|length }}</td>
+                                <td>
+                                    <i class="fas fa-file file-icon me-2"></i>{{ file.name }}
+                                </td>
+                                <td>{{ file.size_formatted }}</td>
+                                <td>{{ file.date_modified }}</td>
+                                <td class="action-buttons">
+                                    <div class="btn-group">
+                                        <a href="{{ url_for('download_file', file=file.path) }}" class="btn btn-sm btn-outline-success">
+                                            <i class="fas fa-download"></i>
+                                        </a>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" 
+                                                onclick="setRenameData('{{ file.name }}', 'file')" 
+                                                data-bs-toggle="modal" data-bs-target="#renameModal">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <form method="post" action="{{ url_for('copy') }}" class="d-inline">
+                                            <input type="hidden" name="item_name" value="{{ file.name }}">
+                                            <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </form>
+                                        <form method="post" action="{{ url_for('cut') }}" class="d-inline">
+                                            <input type="hidden" name="item_name" value="{{ file.name }}">
+                                            <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-warning">
+                                                <i class="fas fa-cut"></i>
+                                            </button>
+                                        </form>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" 
+                                                onclick="setDeleteData('{{ file.name }}', 'file')"
+                                                data-bs-toggle="modal" data-bs-target="#deleteModal">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            
+                            {% if not folders and not files %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4">
+                                    <i class="fas fa-folder-open fa-3x mb-3" style="color: #6c757d;"></i>
+                                    <h5>Folder ini kosong</h5>
+                                    <p class="text-muted">Upload file atau buat folder baru</p>
+                                </td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div class="modal fade" id="uploadModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-upload me-2"></i>Upload File</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data">
+                    <div class="modal-body">
+                        <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                        <div class="mb-3">
+                            <label for="file" class="form-label">Pilih File</label>
+                            <input type="file" class="form-control" id="file" name="file" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                        <button type="submit" class="btn btn-primary">Upload</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Folder Modal -->
+    <div class="modal fade" id="createFolderModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-folder-plus me-2"></i>Buat Folder Baru</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('create_folder') }}" method="post">
+                    <div class="modal-body">
+                        <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                        <div class="mb-3">
+                            <label for="folder_name" class="form-label">Nama Folder</label>
+                            <input type="text" class="form-control" id="folder_name" name="folder_name" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                        <button type="submit" class="btn btn-success">Buat Folder</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rename Modal -->
+    <div class="modal fade" id="renameModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-edit me-2"></i>Rename</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('rename') }}" method="post">
+                    <div class="modal-body">
+                        <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                        <input type="hidden" id="old_name" name="old_name">
+                        <div class="mb-3">
+                            <label id="rename_label" class="form-label">Nama Baru</label>
+                            <input type="text" class="form-control" id="new_name" name="new_name" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                        <button type="submit" class="btn btn-primary">Rename</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Modal -->
+    <div class="modal fade" id="deleteModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="fas fa-trash me-2"></i>Konfirmasi Hapus</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('delete') }}" method="post">
+                    <div class="modal-body">
+                        <input type="hidden" name="current_dir" value="{{ current_dir }}">
+                        <input type="hidden" id="item_name" name="item_name">
+                        <p id="delete_confirmation_message"></p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                        <button type="submit" class="btn btn-danger">Hapus</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Set data for rename modal
+        function setRenameData(name, type) {
+            document.getElementById('old_name').value = name;
+            document.getElementById('new_name').value = name;
+            document.getElementById('rename_label').innerText = 'Rename ' + type + ': ' + name;
+        }
+        
+        // Set data for delete modal
+        function setDeleteData(name, type) {
+            document.getElementById('item_name').value = name;
+            document.getElementById('delete_confirmation_message').innerText = 'Anda yakin ingin menghapus ' + type + ' "' + name + '"?';
+        }
+        
+        // Drag and drop upload functionality
+        const dropZone = document.getElementById('dropZone');
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('bg-light');
+        });
+        
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('bg-light');
+        });
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('bg-light');
+            
+            if (e.dataTransfer.files.length) {
+                document.getElementById('file').files = e.dataTransfer.files;
+                document.querySelector('#uploadModal form').submit();
+            }
+        });
+        
+        // Click on dropzone to open file selector
+        dropZone.addEventListener('click', () => {
+            document.getElementById('uploadModal').querySelector('.btn-primary').click();
+        });
+    </script>
+</body>
+</html>
