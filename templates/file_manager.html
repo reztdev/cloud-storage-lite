@@ -133,11 +133,11 @@
         </div>
 
         <!-- Upload Area (Drag & Drop) -->
-        <div class="upload-area mb-4" id="dropZone">
+<!--         <div class="upload-area mb-4" id="dropZone">
             <i class="fas fa-cloud-upload-alt fa-3x mb-3" style="color: #6c757d;"></i>
             <h5>Drag & Drop Files Here</h5>
             <p class="text-muted">or use the upload button above</p>
-        </div>
+        </div> -->
 
         <!-- File Listing -->
         <div class="card">
@@ -276,12 +276,18 @@
                     <h5 class="modal-title"><i class="fas fa-upload me-2"></i>Upload File</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <form action="{{ url_for('upload_file') }}" method="post" enctype="multipart/form-data">
+                <form id="uploadForm">
                     <div class="modal-body">
                         <input type="hidden" name="current_dir" value="{{ current_dir }}">
                         <div class="mb-3">
                             <label for="file" class="form-label">Pilih File</label>
                             <input type="file" class="form-control" id="file" name="file" required>
+                        </div>
+                        <div class="mb-3" id="progressBarContainer" style="display: none;">
+                            <label class="form-label">Progress</label>
+                            <div class="progress">
+                                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%">0%</div>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -292,6 +298,7 @@
             </div>
         </div>
     </div>
+
 
     <!-- Create Folder Modal -->
     <div class="modal fade" id="createFolderModal" tabindex="-1">
@@ -407,6 +414,50 @@
         // Click on dropzone to open file selector
         dropZone.addEventListener('click', () => {
             document.getElementById('uploadModal').querySelector('.btn-primary').click();
+        });
+        
+        document.getElementById('uploadForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('file');
+            if (!fileInput.files.length) {
+                alert('Pilih file terlebih dahulu!');
+                return;
+            }
+
+            const form = e.target;
+            const formData = new FormData(form);
+            const xhr = new XMLHttpRequest();
+
+            xhr.open('POST', '{{ url_for("upload_file") }}', true);
+
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    const progressBar = document.getElementById('progressBar');
+                    const container = document.getElementById('progressBarContainer');
+
+                    container.style.display = 'block';
+                    progressBar.style.width = percent + '%';
+                    progressBar.textContent = percent + '%';
+                }
+            };
+
+            xhr.onload = function () {
+                if (xhr.status === 200) {
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('uploadModal'));
+                    modal.hide();
+                    window.location.reload();
+                } else {
+                    alert('Upload gagal.');
+                }
+            };
+
+            xhr.onerror = function () {
+                alert('Terjadi kesalahan saat upload.');
+            };
+
+            xhr.send(formData);
         });
     </script>
 </body>
